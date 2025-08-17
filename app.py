@@ -105,7 +105,11 @@ def create_app():
     return app
 
 # Создаем приложение для gunicorn
-app = create_app()
+logger.info("Initializing application for gunicorn...")
+application = create_app()
+app = application  # Алиас для совместимости
+logger.info(f"Application type: {type(application)}")
+logger.info("Application ready for gunicorn!")
 
 if __name__ == '__main__':
     app = create_app()
