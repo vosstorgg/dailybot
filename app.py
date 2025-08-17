@@ -104,12 +104,14 @@ def create_app():
     logger.info("Application created successfully!")
     return app
 
-# Создаем приложение для gunicorn
-logger.info("Initializing application for gunicorn...")
-application = create_app()
-app = application  # Алиас для совместимости
-logger.info(f"Application type: {type(application)}")
-logger.info("Application ready for gunicorn!")
+# Создаем приложение только если запускается через gunicorn
+# Для прямого запуска через python app.py этот код не нужен
+if __name__ != '__main__':
+    logger.info("Module import: Creating application for server...")
+    application = create_app()
+    app = application  # Алиас для совместимости
+    logger.info(f"Module import: Application type: {type(application)}")
+    logger.info("Module import: Application ready!")
 
 if __name__ == '__main__':
     # Для прямого запуска создаем новое приложение

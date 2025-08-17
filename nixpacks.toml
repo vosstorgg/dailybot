@@ -1,0 +1,5 @@
+[start]
+cmd = "python start.py"
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
