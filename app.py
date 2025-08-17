@@ -28,7 +28,8 @@ async def health_check(request):
         'version': '1.0.0',
         'endpoints': {
             'GET /': 'Health check',
-            'GET|POST /set_webhook': 'Configure webhook',
+            'GET /webhook/status': 'Check webhook status (safe)',
+            'POST /webhook/set': 'Configure webhook (secure)',
             'POST /webhook': 'Telegram webhook endpoint'
         }
     })
@@ -55,7 +56,7 @@ async def webhook(request):
         return web.json_response({'error': str(e)}, status=500)
 
 async def set_webhook(request):
-    """Настройка webhook для бота"""
+    """Настройка webhook для бота (только POST)"""
     if not BOT_TOKEN or not WEBHOOK_URL:
         return web.json_response({
             'error': 'Configuration missing',
@@ -85,6 +86,34 @@ async def set_webhook(request):
             'telegram_response': result
         }, status=400)
 
+async def webhook_status(request):
+    """Проверка статуса webhook (безопасный GET)"""
+    if not BOT_TOKEN:
+        return web.json_response({'error': 'BOT_TOKEN not configured'}, status=400)
+    
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo"
+    
+    async with ClientSession() as session:
+        async with session.get(url) as response:
+            result = await response.json()
+    
+    if result.get('ok'):
+        webhook_info = result['result']
+        return web.json_response({
+            'status': 'success',
+            'webhook_configured': bool(webhook_info.get('url')),
+            'webhook_url': webhook_info.get('url', ''),
+            'has_custom_certificate': webhook_info.get('has_custom_certificate', False),
+            'pending_update_count': webhook_info.get('pending_update_count', 0),
+            'last_error_date': webhook_info.get('last_error_date'),
+            'last_error_message': webhook_info.get('last_error_message')
+        })
+    else:
+        return web.json_response({
+            'error': 'Failed to get webhook info',
+            'telegram_response': result
+        }, status=400)
+
 def create_app():
     """Создает и настраивает aiohttp приложение"""
     logger.info("Initializing DailyBot application...")
@@ -105,8 +134,8 @@ def create_app():
     # Маршруты
     app.router.add_get('/', health_check)
     app.router.add_post('/webhook', webhook)
-    app.router.add_get('/set_webhook', set_webhook)
-    app.router.add_post('/set_webhook', set_webhook)
+    app.router.add_get('/webhook/status', webhook_status)  # Безопасная проверка статуса
+    app.router.add_post('/webhook/set', set_webhook)       # Безопасная настройка
     
     # Добавляем CORS для всех маршрутов
     for route in list(app.router.routes()):
