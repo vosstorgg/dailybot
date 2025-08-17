@@ -3,6 +3,7 @@ import logging
 from aiohttp import web, ClientSession
 import aiohttp_cors
 from astro_service import get_daily_astro_summary, test_weather_api_connection, clear_cache
+from user_registration import registration_manager, RegistrationStep
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -57,15 +58,22 @@ async def webhook(request):
         if 'message' in update:
             message = update['message']
             chat_id = message['chat']['id']
-            user_text = message.get('text', '').lower().strip()
             user_id = message.get('from', {}).get('id')
             
+            # Обработка геолокации
+            if 'location' in message:
+                await handle_location(chat_id, user_id, message['location'])
             # Обработка команд
-            if user_text.startswith('/'):
-                await handle_command(chat_id, user_id, user_text)
+            elif 'text' in message:
+                user_text = message['text'].lower().strip()
+                if user_text.startswith('/'):
+                    await handle_command(chat_id, user_id, user_text)
+                else:
+                    # Простая обработка текста
+                    await handle_text_message(chat_id, user_id, user_text)
             else:
-                # Простая обработка текста
-                await handle_text_message(chat_id, user_id, user_text)
+                # Неподдерживаемый тип сообщения
+                await send_message(chat_id, "Извините, я пока поддерживаю только текстовые сообщения и геолокацию.")
             
         return web.json_response({'status': 'ok'})
     
@@ -73,19 +81,59 @@ async def webhook(request):
         logger.error(f"Error processing webhook: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
+async def handle_location(chat_id, user_id, location_data):
+    """Обработка геолокации от пользователя"""
+    try:
+        # Проверяем, ожидается ли геолокация в процессе регистрации
+        current_step = registration_manager.get_registration_step(user_id)
+        
+        if current_step == RegistrationStep.CURRENT_LOCATION:
+            # Обрабатываем геолокацию в процессе регистрации
+            result = registration_manager.process_registration_step(
+                user_id, "", location_data  # пустой текст, передаем location_data
+            )
+            
+            if result.get('success'):
+                await send_message(chat_id, result['message'])
+            else:
+                await send_message(chat_id, f"❌ {result.get('error', 'Ошибка обработки геолокации')}")
+        else:
+            # Геолокация вне процесса регистрации
+            lat, lon = location_data['latitude'], location_data['longitude']
+            await send_message(chat_id, f"""📍 Получил вашу геолокацию!
+
+Координаты: {lat:.4f}, {lon:.4f}
+
+Если вы хотите обновить свое местоположение для более точных прогнозов, используйте /start для обновления профиля.""")
+            
+    except Exception as e:
+        logger.error(f"Error handling location: {e}")
+        await send_message(chat_id, "❌ Ошибка при обработке геолокации.")
+
 async def handle_command(chat_id, user_id, command):
     """Обработка команд бота"""
     if command == '/start':
-        response = """🌟 Добро пожаловать в DailyBot!
-        
-Я помогу вам получать ежедневные астрологические прогнозы.
+        # Проверяем, зарегистрирован ли пользователь
+        if registration_manager.is_registration_complete(user_id):
+            user = registration_manager.get_user(user_id)
+            name = user.personal.get('name', 'Пользователь') if user else 'Пользователь'
+            response = f"""🌟 С возвращением, {name}!
 
-Команды:
-/astro - Астрологическая сводка на сегодня
+Ваши команды:
+/astro - Персональный астропрогноз на сегодня
 /moon - Информация о Луне
-/help - Помощь
+/profile - Ваши данные
+/help - Справка
 
-Скоро будет доступна регистрация с указанием местоположения для персональных прогнозов! ✨"""
+Получить прогноз прямо сейчас? Используйте /astro ✨"""
+        else:
+            # Начинаем регистрацию
+            user_telegram_data = {
+                'user_id': user_id,
+                'first_name': 'User',  # В реальности получаем из update
+                'username': None
+            }
+            response = registration_manager.start_registration(user_id, user_telegram_data)
         
     elif command == '/astro':
         try:
@@ -123,21 +171,46 @@ async def handle_command(chat_id, user_id, command):
         except Exception as e:
             response = "❌ Ошибка получения лунных данных."
     
+    elif command == '/profile':
+        if not registration_manager.is_registration_complete(user_id):
+            response = """📋 Вы еще не зарегистрированы!
+
+Используйте /start для создания персонального профиля и получения точных астрологических прогнозов."""
+        else:
+            user = registration_manager.get_user(user_id)
+            if user:
+                response = f"""👤 Ваш профиль:
+
+{registration_manager._generate_registration_summary(user)}
+
+Для изменения данных используйте /start (перерегистрация)."""
+            else:
+                response = "❌ Ошибка получения данных профиля. Попробуйте /start"
+    
     elif command == '/help':
-        response = """📖 Помощь по DailyBot
+        if registration_manager.is_registration_complete(user_id):
+            response = """📖 Помощь по DailyBot
 
 Доступные команды:
-/start - Начало работы
-/astro - Получить астрологическую сводку
+/start - Главное меню (или перерегистрация)
+/astro - Персональный астропрогноз на сегодня
 /moon - Информация о текущей фазе Луны
+/profile - Ваши данные и настройки
 /help - Эта справка
 
-🔮 DailyBot использует данные о положении планет и Луны для создания персонализированных астрологических прогнозов.
+🔮 DailyBot создает персональные астрологические прогнозы на основе вашей натальной карты и текущих планетарных транзитов."""
+        else:
+            response = """📖 Помощь по DailyBot
 
-Скоро будут доступны:
-• Регистрация с указанием города
-• Персональные прогнозы по времени рождения  
-• Настройка времени получения прогнозов"""
+Для начала работы используйте /start - это запустит процесс регистрации.
+
+После регистрации вам будут доступны:
+• Персональные астропрогнозы
+• Информация о лунных фазах
+• Ежедневные рекомендации
+• Настройка времени получения прогнозов
+
+🔮 Все прогнозы основаны на реальных астрономических данных и вашей натальной карте."""
     
     else:
         response = "❓ Неизвестная команда. Используйте /help для списка команд."
@@ -149,11 +222,63 @@ async def handle_text_message(chat_id, user_id, text):
     if not text:
         return
     
-    # Простое эхо с подсказкой
-    response = f"""Вы написали: "{text}"
+    # Проверяем, находится ли пользователь в процессе регистрации
+    current_step = registration_manager.get_registration_step(user_id)
+    
+    if current_step != RegistrationStep.NOT_STARTED and current_step != RegistrationStep.COMPLETED:
+        # Пользователь в процессе регистрации
+        result = registration_manager.process_registration_step(user_id, text)
+        
+        if result.get('error'):
+            if result.get('restart'):
+                # Начинаем регистрацию заново
+                user_telegram_data = {'user_id': user_id, 'first_name': 'User'}
+                response = registration_manager.start_registration(user_id, user_telegram_data)
+            else:
+                response = f"❌ {result['error']}"
+        elif result.get('success'):
+            response = result['message']
+            
+            # Если регистрация завершена, отправляем первый прогноз
+            if result.get('completed'):
+                await send_message(chat_id, response)
+                # Отправляем первый астропрогноз
+                try:
+                    summary = await get_daily_astro_summary()
+                    if summary.get('status') != 'error':
+                        moon = summary['moon']
+                        astro_response = f"""🔮 Ваш первый персональный прогноз!
 
-💡 Попробуйте команды:
-/astro - Астрологический прогноз
+{moon['description']}
+
+✨ Общая энергетика:
+{summary['general_energy']}
+
+📋 Рекомендации на день:
+""" + '\n'.join(summary['recommendations'])
+                        await send_message(chat_id, astro_response)
+                    return
+                except Exception as e:
+                    logger.error(f"Error sending first forecast: {e}")
+                return
+        else:
+            response = "❌ Произошла ошибка при обработке данных."
+    else:
+        # Обычное сообщение от зарегистрированного пользователя
+        if registration_manager.is_registration_complete(user_id):
+            response = f"""💬 Получил ваше сообщение: "{text}"
+
+💡 Доступные команды:
+/astro - Персональный прогноз
+/moon - Фаза Луны  
+/profile - Ваши данные
+/help - Справка"""
+        else:
+            response = f"""💬 Получил ваше сообщение: "{text}"
+
+Для получения персональных астропрогнозов используйте /start для регистрации.
+
+💡 Или попробуйте:
 /moon - Фаза Луны
 /help - Справка"""
     
