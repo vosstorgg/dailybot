@@ -75,6 +75,10 @@ async def set_webhook(request):
 
 def create_app():
     """Создает и настраивает aiohttp приложение"""
+    logger.info("Creating aiohttp application...")
+    logger.info(f"BOT_TOKEN set: {'Yes' if BOT_TOKEN else 'No'}")
+    logger.info(f"WEBHOOK_URL set: {'Yes' if WEBHOOK_URL else 'No'}")
+    
     app = web.Application()
     
     # Настройка CORS
@@ -97,6 +101,7 @@ def create_app():
     for route in list(app.router.routes()):
         cors.add(route)
     
+    logger.info("Application created successfully!")
     return app
 
 # Создаем приложение для gunicorn
@@ -104,5 +109,7 @@ app = create_app()
 
 if __name__ == '__main__':
     app = create_app()
-    port = int(os.environ.get('PORT', 5000))
-    web.run_app(app, host='0.0.0.0', port=port)
+    port = int(os.environ.get('PORT', 8000))  # Railway часто использует 8000
+    host = os.environ.get('HOST', '0.0.0.0')
+    logger.info(f"Starting server on {host}:{port}")
+    web.run_app(app, host=host, port=port)
