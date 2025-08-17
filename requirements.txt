@@ -1,3 +1,4 @@
 aiohttp==3.9.1
 aiohttp-cors==0.7.0
 gunicorn==21.2.0
+aiohttp[speedups]==3.9.1
