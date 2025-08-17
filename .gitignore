@@ -1,8 +1,11 @@
 # Environment variables
 .env
+.env.local
+env.local
 
 # Documentation
 README.md
+LOCAL_DEV.md
 
 # Python
 __pycache__/
