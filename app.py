@@ -103,16 +103,14 @@ def create_app():
     })
     
     # Маршруты
-    routes = [
-        web.get('/', health_check),
-        web.post('/webhook', webhook),
-        web.get('/set_webhook', set_webhook),
-        web.post('/set_webhook', set_webhook),
-    ]
+    app.router.add_get('/', health_check)
+    app.router.add_post('/webhook', webhook)
+    app.router.add_get('/set_webhook', set_webhook)
+    app.router.add_post('/set_webhook', set_webhook)
     
-    for route in routes:
-        app.router.add_route(route.method, route.path, route.handler)
-        cors.add(app.router.routes()[-1])
+    # Добавляем CORS для всех маршрутов
+    for route in list(app.router.routes()):
+        cors.add(route)
     
     logger.info("Application initialized successfully!")
     return app
