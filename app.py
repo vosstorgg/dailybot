@@ -3,7 +3,9 @@ import logging
 from aiohttp import web, ClientSession
 import aiohttp_cors
 from astro_service import get_daily_astro_summary, test_weather_api_connection, clear_cache
-from user_registration import registration_manager, RegistrationStep
+from user_registration import RegistrationStep
+from database import initialize_database, db_manager
+from db_registration_adapter import db_registration_manager
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -31,12 +33,13 @@ async def health_check(request):
     return web.json_response({
         'status': 'ok', 
         'message': 'DailyBot is running!',
-        'version': '1.1.0',
-        'features': ['telegram_bot', 'astrology', 'moon_phases'],
+        'version': '1.2.0',
+        'features': ['telegram_bot', 'astrology', 'moon_phases', 'user_registration', 'postgresql_db'],
         'configuration': {
             'BOT_TOKEN': '✓' if BOT_TOKEN else '✗',
             'WEBHOOK_URL': '✓' if WEBHOOK_URL else '✗',
-            'WEATHER_API_KEY': '✓' if WEATHER_API_KEY else '✗'
+            'WEATHER_API_KEY': '✓' if WEATHER_API_KEY else '✗',
+            'DATABASE_URL': '✓' if os.getenv('DATABASE_URL') else '✗'
         },
         'endpoints': {
             'GET /': 'Health check',
@@ -85,11 +88,11 @@ async def handle_location(chat_id, user_id, location_data):
     """Обработка геолокации от пользователя"""
     try:
         # Проверяем, ожидается ли геолокация в процессе регистрации
-        current_step = registration_manager.get_registration_step(user_id)
+        current_step = db_registration_manager.get_registration_step(user_id)
         
         if current_step == RegistrationStep.CURRENT_LOCATION:
             # Обрабатываем геолокацию в процессе регистрации
-            result = registration_manager.process_registration_step(
+            result = await db_registration_manager.process_registration_step(
                 user_id, "", location_data  # пустой текст, передаем location_data
             )
             
@@ -114,8 +117,8 @@ async def handle_command(chat_id, user_id, command):
     """Обработка команд бота"""
     if command == '/start':
         # Проверяем, зарегистрирован ли пользователь
-        if registration_manager.is_registration_complete(user_id):
-            user = registration_manager.get_user(user_id)
+        if db_registration_manager.is_registration_complete(user_id):
+            user = await db_registration_manager.get_user(user_id)
             name = user.personal.get('name', 'Пользователь') if user else 'Пользователь'
             response = f"""🌟 С возвращением, {name}!
 
@@ -133,7 +136,7 @@ async def handle_command(chat_id, user_id, command):
                 'first_name': 'User',  # В реальности получаем из update
                 'username': None
             }
-            response = registration_manager.start_registration(user_id, user_telegram_data)
+            response = await db_registration_manager.start_registration(user_id, user_telegram_data)
         
     elif command == '/astro':
         try:
@@ -172,23 +175,23 @@ async def handle_command(chat_id, user_id, command):
             response = "❌ Ошибка получения лунных данных."
     
     elif command == '/profile':
-        if not registration_manager.is_registration_complete(user_id):
+        if not db_registration_manager.is_registration_complete(user_id):
             response = """📋 Вы еще не зарегистрированы!
 
 Используйте /start для создания персонального профиля и получения точных астрологических прогнозов."""
         else:
-            user = registration_manager.get_user(user_id)
+            user = await db_registration_manager.get_user(user_id)
             if user:
                 response = f"""👤 Ваш профиль:
 
-{registration_manager._generate_registration_summary(user)}
+{db_registration_manager._generate_registration_summary(user)}
 
 Для изменения данных используйте /start (перерегистрация)."""
             else:
                 response = "❌ Ошибка получения данных профиля. Попробуйте /start"
     
     elif command == '/help':
-        if registration_manager.is_registration_complete(user_id):
+        if db_registration_manager.is_registration_complete(user_id):
             response = """📖 Помощь по DailyBot
 
 Доступные команды:
@@ -223,17 +226,17 @@ async def handle_text_message(chat_id, user_id, text):
         return
     
     # Проверяем, находится ли пользователь в процессе регистрации
-    current_step = registration_manager.get_registration_step(user_id)
+    current_step = db_registration_manager.get_registration_step(user_id)
     
     if current_step != RegistrationStep.NOT_STARTED and current_step != RegistrationStep.COMPLETED:
         # Пользователь в процессе регистрации
-        result = registration_manager.process_registration_step(user_id, text)
+        result = await db_registration_manager.process_registration_step(user_id, text)
         
         if result.get('error'):
             if result.get('restart'):
                 # Начинаем регистрацию заново
                 user_telegram_data = {'user_id': user_id, 'first_name': 'User'}
-                response = registration_manager.start_registration(user_id, user_telegram_data)
+                response = await db_registration_manager.start_registration(user_id, user_telegram_data)
             else:
                 response = f"❌ {result['error']}"
         elif result.get('success'):
@@ -265,7 +268,7 @@ async def handle_text_message(chat_id, user_id, text):
             response = "❌ Произошла ошибка при обработке данных."
     else:
         # Обычное сообщение от зарегистрированного пользователя
-        if registration_manager.is_registration_complete(user_id):
+        if db_registration_manager.is_registration_complete(user_id):
             response = f"""💬 Получил ваше сообщение: "{text}"
 
 💡 Доступные команды:
