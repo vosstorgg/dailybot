@@ -1,3 +1,6 @@
+"""
+Асинхронная factory функция для gunicorn
+"""
 import os
 import logging
 import asyncio
@@ -73,11 +76,11 @@ async def set_webhook(request):
     else:
         return web.json_response({'status': 'error', 'message': result.get('description', 'Unknown error')})
 
-def create_app():
-    """Создает и настраивает aiohttp приложение"""
-    logger.info("Creating aiohttp application...")
-    logger.info(f"BOT_TOKEN set: {'Yes' if BOT_TOKEN else 'No'}")
-    logger.info(f"WEBHOOK_URL set: {'Yes' if WEBHOOK_URL else 'No'}")
+async def create_app():
+    """Асинхронно создает и настраивает aiohttp приложение"""
+    logger.info("ASYNC: Creating aiohttp application...")
+    logger.info(f"ASYNC: BOT_TOKEN set: {'Yes' if BOT_TOKEN else 'No'}")
+    logger.info(f"ASYNC: WEBHOOK_URL set: {'Yes' if WEBHOOK_URL else 'No'}")
     
     app = web.Application()
     
@@ -95,26 +98,11 @@ def create_app():
     app.router.add_get('/', health_check)
     app.router.add_post('/webhook', webhook)
     app.router.add_post('/set_webhook', set_webhook)
-    app.router.add_get('/set_webhook', set_webhook)  # Добавляем GET для удобства
+    app.router.add_get('/set_webhook', set_webhook)
     
     # Добавляем CORS для всех routes
     for route in list(app.router.routes()):
         cors.add(route)
     
-    logger.info("Application created successfully!")
+    logger.info("ASYNC: Application created successfully!")
     return app
-
-# Создаем приложение для gunicorn
-logger.info("Initializing application for gunicorn...")
-application = create_app()
-app = application  # Алиас для совместимости
-logger.info(f"Application type: {type(application)}")
-logger.info("Application ready for gunicorn!")
-
-if __name__ == '__main__':
-    # Для прямого запуска создаем новое приложение
-    local_app = create_app()
-    port = int(os.environ.get('PORT', 8080))  # Railway использует 8080
-    host = os.environ.get('HOST', '0.0.0.0')
-    logger.info(f"Direct Python start: Starting server on {host}:{port}")
-    web.run_app(local_app, host=host, port=port)

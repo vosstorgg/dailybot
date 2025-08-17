@@ -1,0 +1,10 @@
+# Альтернативные варианты запуска для Railway
+
+# Вариант 1: Стандартный gunicorn с wsgi.py
+web: gunicorn wsgi:application --worker-class aiohttp.GunicornWebWorker
+
+# Вариант 2: Прямой запуск через Python
+web: python app.py
+
+# Вариант 3: Использование uvicorn (если не работает gunicorn)
+# web: uvicorn app:app --host 0.0.0.0 --port $PORT
