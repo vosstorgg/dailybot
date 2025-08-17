@@ -26,7 +26,15 @@ async def send_message(chat_id, text):
 
 async def health_check(request):
     """Проверка работоспособности сервиса"""
-    return web.json_response({'status': 'ok', 'message': 'Dailybot is running!'})
+    return web.json_response({
+        'status': 'ok', 
+        'message': 'Dailybot is running!',
+        'endpoints': {
+            'GET /': 'Health check',
+            'GET /set_webhook': 'Set webhook (also accepts POST)',
+            'POST /webhook': 'Telegram webhook endpoint'
+        }
+    })
 
 async def webhook(request):
     """Асинхронный обработчик webhook от Telegram"""
@@ -83,6 +91,7 @@ def create_app():
     app.router.add_get('/', health_check)
     app.router.add_post('/webhook', webhook)
     app.router.add_post('/set_webhook', set_webhook)
+    app.router.add_get('/set_webhook', set_webhook)  # Добавляем GET для удобства
     
     # Добавляем CORS для всех routes
     for route in list(app.router.routes()):
